@@ -1,15 +1,17 @@
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import nodemailer from 'nodemailer'
-import { buffer } from 'micro'
 
 export const config = { api: { bodyParser: false } }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-)
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
 
 async function sendAdminEmail(session, submissionId) {
   if (!process.env.SMTP_HOST || !process.env.ADMIN_EMAIL) return
@@ -54,7 +56,7 @@ async function sendAdminEmail(session, submissionId) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const rawBody = await buffer(req)
+  const rawBody = await getRawBody(req)
   const sig = req.headers['stripe-signature']
 
   let event
@@ -69,7 +71,6 @@ export default async function handler(req, res) {
     const session = event.data.object
     const submissionId = session.metadata?.submission_id
 
-    // Update submission status in Supabase
     if (submissionId && process.env.NEXT_PUBLIC_SUPABASE_URL) {
       await supabase
         .from('submissions')
@@ -82,7 +83,6 @@ export default async function handler(req, res) {
         .eq('id', submissionId)
     }
 
-    // Send admin notification
     await sendAdminEmail(session, submissionId)
   }
 
